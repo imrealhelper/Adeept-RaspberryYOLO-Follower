@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 
 import rospy
-# import cv2
-# import numpy as np
 from geometry_msgs.msg import Twist
-from sensor_msgs.msg import Range
 from sensor_msgs.msg import Image
 from detection_msgs.msg import BoundingBox, BoundingBoxes
-from std_msgs.msg import ColorRGBA
 import random
 
 class ObjectFollower:
@@ -23,21 +19,8 @@ class ObjectFollower:
         self.base_recovery_speed = 0.001  # Base speed for recovery rotation
         self.in_recovery = False
         
-        
         # Temporarily subscribe to /img to get image dimensions
         self.image_sub = rospy.Subscriber('/img', Image, self.image_callback)
-        
-        # Green light
-        self.led_pub = rospy.Publisher('/led', ColorRGBA, queue_size=10)
-         
-    def turn_on_led(self):
-        led = ColorRGBA()
-        led.r = 0.0
-        led.g = 1.0
-        led.b = 0.0
-        led.a = 1.0
-        self.led_pub.publish(led)
-        
     
     def image_callback(self, image):
         self.image_width = image.width
@@ -78,6 +61,7 @@ class ObjectFollower:
             
             # Increment recovery attempts
             self.recovery_attempts += 1
+
     def stop_recovery(self):
         self.in_recovery = False
         self.recovery_start_time = None
@@ -86,7 +70,6 @@ class ObjectFollower:
     def update_last_seen(self, angle):
         self.last_seen_angle = angle  
         
-     
     def calculate_angle_to_person_from_box_position(self, box_center_x):
         # Find the offset from the center
         offset_x = box_center_x - self.image_width / 2
@@ -98,10 +81,7 @@ class ObjectFollower:
 
         return angle_offset
      
-                  
-    
     def callback(self, bounding_boxes):
-        self.turn_on_led()
         person_detected = False
         Kp = 0.001  # Proportional gain for turning
         Kp_size = 0.001  # Proportional gain for linear speed
@@ -116,60 +96,46 @@ class ObjectFollower:
         base_recovery_speed = 0.001
         recovery_angular_speed = random.choice([-1, 1]) * base_recovery_speed
 
-    
         for box in bounding_boxes.bounding_boxes:
             if box.Class == "person" and box.probability >= 0.3:
                 person_detected = True
             
-            # Calculate how off-center the target is
+                # Calculate how off-center the target is
                 offset_x = box.center_x - (self.image_width // 2)
                 print(f"offset_x:{offset_x}")
                 actual_size = box.xmax - box.xmin  # Assuming you have this info in box
                 print(f"actual_size:{actual_size}")
-            # Proportional control for angular and linear speed
+            
+                # Proportional control for angular and linear speed
                 alpha = 0.5
                 smoothed_offset_x = alpha * offset_x + (1 - alpha) * prev_offset_x 
 
                 angular_speed = Kp * smoothed_offset_x + Kd * (smoothed_offset_x - prev_offset_x) if abs(smoothed_offset_x) > dead_zone else 0
                 prev_offset_x = offset_x
                 linear_speed = Kp_size * abs(desired_size - actual_size)
-            # Safety bounds
+                
+                # Safety bounds
                 angular_speed = max(-max_angular_speed, min(max_angular_speed, angular_speed))
                 linear_speed = max(min_linear_speed, min(max_linear_speed, linear_speed))
 
-            
-            # Generate cmd_vel message based on offsets
+                # Generate cmd_vel message based on offsets
                 cmd = Twist()
                 cmd.linear.x = linear_speed
                 cmd.angular.z = angular_speed
                 rospy.loginfo(f"Linear Speed: {cmd.linear.x}, Angular Speed: {cmd.angular.z}")
             
-            # Publish cmd_vel message to move/rotate the robot
+                # Publish cmd_vel message to move/rotate the robot
                 self.cmd_vel_pub.publish(cmd)
                 break  # Exit after the first person is found
 
         if not person_detected:
-            #self.start_recovery()
             cmd = Twist()
             cmd.linear.x = 0.0
             cmd.angular.z = 0.0
             self.cmd_vel_pub.publish(cmd)
-             
-        #else:
-         #   self.stop_recovery()
-            # Assuming you can determine the angle from the bounding box's position
-          #  angle_to_person = self.calculate_angle_to_person_from_box_position(box.center_x)
-           # self.update_last_seen(angle_to_person)
-                                 
-
-
-
-
-
-
+            
 
 if __name__ == '__main__':
     rospy.init_node('object_follower')
     object_follower = ObjectFollower()
     rospy.spin()
-
